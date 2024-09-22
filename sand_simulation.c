@@ -14,8 +14,8 @@
 
 #define TAG "SandSimulation"
 
-#define SCREEN_WIDTH 128
-#define SCREEN_HEIGHT 64
+#define SCREEN_WIDTH 127
+#define SCREEN_HEIGHT 63
 #define FPS 10
 
 // App menu items
@@ -90,6 +90,7 @@ static void SandSim_view_game_draw_callback(Canvas* canvas, void* ssGame){
     furi_mutex_acquire(game->mutex, FuriWaitForever);
 
     canvas_draw_dot(canvas, game->x, game->y);
+    canvas_draw_frame(canvas, game->x - 2, game->y - 2, 5, 5);
 
     furi_mutex_release(game->mutex);
 }
@@ -108,6 +109,8 @@ static void SandSim_view_game_enter_callback(void* ctx){
 
     SandSimApp* app = ctx;
 
+    notification_message(app->notifications, &sequence_display_backlight_enforce_on);
+
     furi_assert(app->timer == NULL);
     app->timer = furi_timer_alloc(SandSim_view_game_timer_callback, FuriTimerTypePeriodic, ctx);
     furi_timer_start(app->timer, 1000 / FPS);
@@ -118,6 +121,9 @@ static void SandSim_view_game_exit_callback(void* ctx){
     FURI_LOG_T(TAG, "SandSim_view_game_exit_callback");
 
     SandSimApp* app = ctx;
+
+    notification_message(app->notifications, &sequence_display_backlight_enforce_auto);
+
     furi_timer_stop(app->timer);
     furi_timer_free(app->timer);
     app->timer = NULL;
@@ -147,12 +153,21 @@ static bool SandSim_view_game_input_callback(InputEvent* i_event, void* ctx){
     FURI_LOG_T(TAG, "SandSim_view_game_input_callback");
 
     SandSimApp* app = ctx;
-    if(i_event->type == InputTypeShort){
+    if(i_event->type == InputTypeRepeat || i_event->type == InputTypePress){
+        uint8_t speed = (i_event->type == InputTypeRepeat) ? 4 : 1;
+
         if(i_event->key == InputKeyLeft){
-            with_view_model(app->view_game, SandSimGame* game, {if(game->x > 1) game->x--;}, true);
+            with_view_model(app->view_game, SandSimGame* game, {game->x = (game->x - speed > 0) ? game->x - speed : 0;}, true);
         }
         else if(i_event->key == InputKeyRight){
-            with_view_model(app->view_game, SandSimGame* game, {if(game->x < SCREEN_WIDTH) game->x++;}, true);
+            with_view_model(app->view_game, SandSimGame* game, {game->x = (game->x + speed < SCREEN_WIDTH) ? game->x + speed : SCREEN_WIDTH;}, true);
+        }
+
+        if(i_event->key == InputKeyUp){
+            with_view_model(app->view_game, SandSimGame* game, {game->y = (game->y - speed > 0) ? game->y - speed : 0;}, true);
+        }
+        else if(i_event->key == InputKeyDown){
+            with_view_model(app->view_game, SandSimGame* game, {game->y = (game->y + speed < SCREEN_HEIGHT) ? game->y + speed : SCREEN_HEIGHT;}, true);
         }
     }
     else if(i_event->type == InputTypePress){
@@ -221,10 +236,15 @@ static SandSimApp* SandSim_application_alloc(){
     view_set_previous_callback(widget_get_view(app->widget_about), SandSim_navigation_submenu_callback);
     view_dispatcher_add_view(app->view_dispatcher, SandSimView_About, widget_get_view(app->widget_about));
 
+    app->notifications = furi_record_open(RECORD_NOTIFICATION);
+
     return app;
 }
 
 static void SandSim_application_free(SandSimApp* app){
+    notification_message(app->notifications, &sequence_display_backlight_enforce_auto);
+    furi_record_close(RECORD_NOTIFICATION);
+
     view_dispatcher_remove_view(app->view_dispatcher, SandSimView_About);
     widget_free(app->widget_about);
 
